@@ -1,0 +1,102 @@
+---
+title: "Web_Downloading_Chilean_Climate_Data"
+output: html_document
+date: "2023-03-20"
+---
+This function will download weather data from metochile.gob. The data downloads minute data, and you can select by month. This is still a work in progress, future updates might include selecting by day. 
+
+NOTE: r libraries lubridate and tidyverse are required for this.
+
+Common weather variables:
+
+Rainfall is AguaCaida
+Cloud cover is Nubosidad
+Pressure and Humidity is PresionHumedad
+Temperature is Temperatura
+Wind is Viento
+Radiation is RadiacionGlobal
+
+Copy and Paste exactly as they are in Spanish into 'weather_variable'
+
+The different variables and weather stations can be found here:
+https://climatologia.meteochile.gob.cl/application/index/menuTematicoEmas
+
+Select the date by month in the format: yyyy/mm/dd
+
+Here is an example:
+data <- download_weather_data("2019/02/01", "2019/04/30", "390006", "AguaCaida")
+
+
+```{r}
+wind <- download_weather_data("2020/02/13", "2020/04/16", "390006", "Viento")
+temp <- download_weather_data("2020/02/13", "2020/04/16", "390006", "Temperatura")
+pres_hum <- download_weather_data("2020/02/13", "2020/04/16", "390006", "PresionHumedad")
+```
+
+
+```{r}
+library(lubridate)
+library(tidyverse)
+library(plyr)
+
+download_weather_data <- function(start_date, end_date, StationID, weather_variable, outDir = getwd()) {
+
+  # Here we turn the start date and end date into the format that is used in the url used to download
+  Months <- (interval(ymd(start_date), ymd(end_date)) %/% months(1))+1
+  range <- seq(ymd(start_date), by = "month", length.out = Months) #finds the # of months of data to download
+  range_zip <- mapply(c, year(range), month(range), SIMPLIFY = FALSE) #creates a list of years and months
+  vec <- unlist(range_zip, recursive = TRUE, use.names = FALSE) #unlists the list
+  
+  # This will combine the year and month to a single number of 6 characters.
+  YearMonth <- character(length(vec)/2)
+  for (i in seq_along(YearMonth)) {
+    YearMonth[i] <- paste0(vec[(2*i-1)], sprintf("%02d", vec[2*i])) #This adds a leading 0 if the month is less than 10 as well as creates a value of yyyymm which is used in the url
+  }
+
+  # Set a base url that will be modified with the modified start date, modified end date, station id, and weather variable
+  url_base <- "https://climatologia.meteochile.gob.cl/application/datos/getDatosEma/StationID/StationID_Date_WeatherVariable.csv.zip"
+
+  # Create an empty list to store the downloaded file names
+  downloaded_files <- list()
+  
+  # Loop through all the dates in YearMonth and paste the station id and weather variable in the appropriate spots in the URL 
+  for (date in YearMonth) {
+    zipF <- paste(StationID,"_",date,".zip", sep = "")
+    url_1 <- gsub("Date", date, url_base) #these lines sub the variables into the url
+    url_2 <- gsub("WeatherVariable", weather_variable, url_1)
+    url <- gsub("StationID", StationID, url_2) #this is the final url used to download the data
+    download.file(url, zipF)
+    file <- unzip(zipF, exdir=outDir)
+    downloaded_files <- c(downloaded_files, file) # Add the downloaded files to the list
+    file.remove(zipF) #removes the zip file to keep directory clean and tidy
+  }
+
+  # Create a vector of file names
+  file_list <- grep(paste(YearMonth, collapse = "|"), downloaded_files, value = TRUE)
+
+  # Read in the files into a list
+  data_list <- lapply(file_list, function(x) {
+    read.csv(x, sep = ";")
+  })
+  
+  #use that function
+  data_list <- drop_extra_cols(data_list)
+
+  # Combine the data frames into one
+ all_data <- rbind.fill(data_list)
+  
+  # Delete the downloaded .csv to clean up the directory
+  data_list <- lapply(file_list, function(x) {
+    file.remove(x)
+  })
+  
+  #select only the data from the original date ranges.
+  all_data <- filter(all_data, momento >= ymd(start_date) & momento <= ymd(end_date))
+
+  # Return the combined data frame
+  return(all_data)
+}
+
+``` 
+
+
